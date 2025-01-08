@@ -50,9 +50,10 @@ enum Architecture : s32 {
     DONUT_ARCH_X84 = 3
 };
 union hashTable {
-    u64 hash[64];
-    u64 addr[64];
+    u64 hash;
+    u64 addr;
 };
+
 struct DONUT_CRYPT {
     char EncKey[16];
     char EncNonce[16];
@@ -64,16 +65,40 @@ struct LoaderMulti {
     u8 X64_RSP_Align[22];
     u8 Loader[LoaderSize-22];
     u8 x86StackAlignment[3];
-    u8 x86Loader[];
+    u8 x86Loader[while(!std::mem::eof())];
 };
-struct Instance {
+struct DOTNetGUIDs {
+    char xIID_IUnkown[16];
+    char xIID_IDispatch[16];
+    
+    // GUIDs required to load .NET assemblies
+    char xCLSID_CLRMetaHost[16];
+    char xIID_ICLRMetaHost[16];
+    char xIID_ICLRRuntimeHost[16];
+    char xCLSID_CorRuntimeHost[16];
+    char xIID_AppDomain [16];
+    
+    //GUIDs for VBS and JS files
+    char xCLSID_ScriptLanguage[16];
+    char xIID_IHost[16];
+    char xIID_IActiveScript[16];
+    char xIID_IActiveScriptSite[16];
+    char xIID_IActiveScriptSiteWindow[16];
+    char xIID_IActiveScriptParse32[16];
+    char xIID_IActiveScriptParse64[16];
+    u8 random[19];
+};
+
+struct instanceHeader {
     u32 InstanceSize;  
     DONUT_CRYPT instanceKey;
     u64 hashIv;
-    hashTable ImportsMaybe;
+    hashTable ImportsMaybe[64];
     ExitOptions exitOption;
     Entropy entropy;
     u32 OriginalEntryPoint;
+};
+struct instanceBody {
     u32 apiCount;
     char dllNames[DONUT_MAX_NAME];
     char dataName[8];
@@ -98,26 +123,7 @@ struct Instance {
     char wscript[8];
     char wscript_exe[12];
     char decoy[MAX_PATH * 2];
-    char xIID_IUnkown[16];
-    char xIID_IDispatch[16];
-    
-    // GUIDs required to load .NET assemblies
-    char xCLSID_CLRMetaHost[16];
-    char xIID_ICLRMetaHost[16];
-    char xIID_ICLRRuntimeHost[16];
-    char xCLSID_CorRuntimeHost[16];
-    char xIID_AppDomain [16];
-    
-    //GUIDs for VBS and JS files
-    char xCLSID_ScriptLanguage[16];
-    char xIID_IHost[16];
-    char xIID_IActiveScript[16];
-    char xIID_IActiveScriptSite[16];
-    char xIID_IActiveScriptSiteWindow[16];
-    char xIID_IActiveScriptParse32[16];
-    char xIID_IActiveScriptParse64[16];
-    u8 random[19];
-
+    DOTNetGUIDs dotNetGUID;
     InstanceType InstanceType;
     char Server[DONUT_MAX_NAME];
     char username[DONUT_MAX_NAME];
@@ -127,26 +133,39 @@ struct Instance {
     u8 sig[DONUT_MAX_NAME];
     u64 mac;
 };
-struct Module {
+struct module {
     DONUT_CRYPT modKey;
     u64 modLen;
     ModuleType modType;
     u32 Unknown;
     CompressionType compressionType;
-    u8 data[1304];
+    u8 data[1300];
+    s32 ModLen;
     s32 compressedModLen;
-    u8 Module[compressedModLen];
+    u8 payload[compressedModLen];
 };
-struct DonutInjector {
+struct instance {
+    instanceHeader iHeader;
+    if (iHeader.entropy == 1) {
+        instanceBody iBody;
+        module Module;
+    }
+    else {
+        u8 encryptedData[iHeader.InstanceSize-572];
+    }
+};
+struct donutLoader {
     u8 CallOp;
     u32 loaderAddr;
-    Instance instance;
-    Module module;
+    instance Instance;
 };
 
-DonutInjector Injector @ 0x0;
+donutLoader Injector @ 0x0;
 LoaderMulti loader @ Injector.loaderAddr+5;
 
-std::mem::Section decryptedInstance = std::mem::create_section("Decrypted Instance");
-std::mem::set_section_size(decryptedInstance,Injector.instance.InstanceSize);
-u8 sectionData[0x100] @ 0x00 in decryptedInstance;
+if (Injector.Instance.iHeader.entropy != 1){
+    std::mem::Section decryptedInstance = std::mem::create_section("Decrypted Instance");
+    std::mem::set_section_size(decryptedInstance,Injector.Instance.iHeader.InstanceSize-572);
+    std::mem::copy_value_to_section(Injector.Instance.encryptedData, decryptedInstance, 0x0);
+    instanceBody sect @ 0x00 in decryptedInstance;
+}
